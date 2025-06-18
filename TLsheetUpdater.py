@@ -133,7 +133,7 @@ def authenticate_gspread_service_account():
             return None
 
         # Authorize the client
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, OAUTH_SCOPES)
+        creds = ServiceAccountCredentials.from_service_account_info(creds_dict, scopes=OAUTH_SCOPES)
         client = gspread.authorize(creds)
         st.success("Successfully authenticated with Google Sheets using Service Account!")
         return client
