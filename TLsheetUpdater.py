@@ -119,56 +119,28 @@ def parse_date_flexible(date_str):
     return None
 
 @st.cache_resource # Cache the gspread client resource
-def authenticate_gspread_oauth():
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        try:
-            creds = Credentials.from_authorized_user_file(TOKEN_FILE, OAUTH_SCOPES)
-        except Exception as e:
-            st.error(f"Error loading token.json: {e}. Please re-authenticate.")
-            creds = None
-            if os.path.exists(TOKEN_FILE):
-                 os.remove(TOKEN_FILE)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            try:
-                creds.refresh(Request())
-                st.info("Google credentials refreshed.")
-            except Exception as e:
-                st.warning(f"Could not refresh token: {e}. Please re-authenticate.")
-                creds = None
+def authenticate_gspread_service_account():
+    """
+    Authenticates with Google Sheets using a Service Account from Streamlit Secrets.
+    """
+    try:
+        # Check if the secrets for the service account are available
+        if "gcp_service_account" in st.secrets:
+            creds_dict = st.secrets["gcp_service_account"]
         else:
-            if not os.path.exists(CREDENTIALS_FILE):
-                st.error(f"OAuth `credentials.json` not found at {os.path.abspath(CREDENTIALS_FILE)}.")
-                st.caption(f"Please download your OAuth 2.0 client ID (type: Desktop app) from Google Cloud Console and place it here.")
-                return None
-            try:
-                flow = InstalledAppFlow.from_client_secrets_file(CREDENTIALS_FILE, OAUTH_SCOPES)
-                st.info("Attempting to authenticate via browser. Please follow instructions there.")
-                creds = flow.run_local_server(port=0)
-                st.success("Authentication successful!")
-            except Exception as e:
-                st.error(f"OAuth flow failed: {e}. Ensure credentials.json is valid.")
-                return None
-        if creds:
-            try:
-                with open(TOKEN_FILE, 'w') as token:
-                    token.write(creds.to_json())
-                st.info(f"Token saved to {TOKEN_FILE}")
-            except Exception as e:
-                st.warning(f"Could not save token: {e}")
-
-    if creds and creds.valid:
-        try:
-            client = gspread.authorize(creds)
-            # st.success("gspread client authorized successfully!") # Already covered by general success
-            return client
-        except Exception as e:
-            st.error(f"Failed to authorize gspread client: {e}")
+            st.error("GCP Service Account credentials not found in Streamlit Secrets.")
+            st.info("Please add them to your Streamlit Cloud app's secret management.")
             return None
-    else:
-        st.error("Could not obtain valid Google credentials after OAuth flow.")
+
+        # Authorize the client
+        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, OAUTH_SCOPES)
+        client = gspread.authorize(creds)
+        st.success("Successfully authenticated with Google Sheets using Service Account!")
+        return client
+
+    except Exception as e:
+        st.error(f"Failed to authorize gspread client with Service Account: {e}")
+        traceback.print_exc()
         return None
 
 
@@ -354,26 +326,13 @@ st.set_page_config(page_title="TL Sheet Updater and Auditor", layout="wide")
 st.title("💻 TL Sheet Updater and Auditor")
 
 # --- Authentication ---
-if 'gc' not in st.session_state:
-    st.session_state.gc = None
+if 'gc' not in st.session_state or st.session_state.gc is None:
+    with st.spinner("Authenticating with Google Sheets..."):
+        st.session_state.gc = authenticate_gspread_service_account()
 
+# If authentication fails, stop the app
 if st.session_state.gc is None:
-    st.info("Please authenticate with Google to proceed.")
-    if not os.path.exists(CREDENTIALS_FILE):
-        st.error(f"OAuth `credentials.json` file not found: {os.path.abspath(CREDENTIALS_FILE)}")
-        st.caption(f"Please download your OAuth 2.0 client ID (type: Desktop app) from Google Cloud Console and place '{CREDENTIALS_FILE}' in the same directory as this script.")
-        st.stop()
-    
-    if st.button("Login to Google via OAuth"):
-        with st.spinner("Attempting Google OAuth... Check your browser for a login prompt."):
-            client = authenticate_gspread_oauth() # This function now handles print to console/UI via st.info etc.
-            if client:
-                st.session_state.gc = client
-                # st.success("Successfully authenticated with Google!") # authenticate_gspread_oauth handles this
-                st.rerun() 
-            else:
-                st.error("Google Authentication failed. Check console if running locally, or ensure credentials.json is correct.")
-    st.stop() 
+    st.stop()
 
 gc = st.session_state.gc
 
